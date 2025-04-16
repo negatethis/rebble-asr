@@ -58,27 +58,19 @@ SAMPLE_WIDTH = 2
 SAMPLE_CHANNELS = 1
 
 # Determine which provider to use
-try:
-    # If API key is not set, use Vosk
-    if not API_KEY and os.environ.get('ASR_API_PROVIDER') != 'wyoming-whisper':
-        ASR_API_PROVIDER = 'vosk'
-        print("[INFO] No API key set, using Vosk for transcription")
-    else:
-        # Get the provider from environment and strip any quotes
-        ASR_API_PROVIDER = os.environ.get('ASR_API_PROVIDER', 'groq')
-        # Remove quotes if they exist
-        ASR_API_PROVIDER = ASR_API_PROVIDER.strip('"\'')
-except Exception:
-    # Fallback to Vosk if there's any error in provider setup
-    ASR_API_PROVIDER = 'vosk'
-    print("[INFO] Error determining API provider, using Vosk as fallback")
+if not API_KEY and os.environ.get('ASR_API_PROVIDER') != 'wyoming-whisper':
+    raise Exception("[ERROR] No API key set and not using wyoming-whisper. Please provide an API key.")
+else:
+    # Get the provider from environment and strip any quotes
+    ASR_API_PROVIDER = os.environ.get('ASR_API_PROVIDER', 'groq')
+    # Remove quotes if they exist
+    ASR_API_PROVIDER = ASR_API_PROVIDER.strip('"\'')
 
 logger.info(f"Using ASR API provider: {ASR_API_PROVIDER}")
 
 # Check if Wyoming is available when selected
 if ASR_API_PROVIDER == 'wyoming-whisper' and not HAS_WYOMING:
-    logger.warning("Wyoming-whisper selected but Wyoming package not installed, falling back to Vosk")
-    ASR_API_PROVIDER = 'vosk'
+    raise Exception("Wyoming-whisper selected but Wyoming package not installed.")
 
 
 # We know gunicorn does this, but it doesn't *say* it does this, so we must signal it manually.
@@ -274,87 +266,6 @@ def wyoming_whisper_transcribe(wav_buffer):
             logger.debug(traceback.format_exc())
         return None
 
-def vosk_transcribe(wav_buffer):
-    try:
-        if DEBUG:
-            logger.debug("Starting Vosk transcription")
-            vosk_start_time = time.time()
-
-        from vosk import Model, KaldiRecognizer
-        import json
-
-        # Check if model directory exists
-        model_path = os.environ.get('VOSK_MODEL_PATH', '/code/model')
-        if not os.path.exists(model_path):
-            logger.error(f"Vosk model directory not found at {model_path}")
-            return None
-
-        # Check for model files
-        model_files = os.listdir(model_path)
-        if DEBUG:
-            logger.debug(f"Files in model directory: {model_files}")
-
-        required_files = ['am', 'conf', 'ivector']
-        missing_files = [f for f in required_files if not any(f in file for file in model_files)]
-
-        if missing_files:
-            logger.error(f"Missing required Vosk model files: {missing_files}")
-            return None
-
-        try:
-            # Initialize model
-            model_init_start = time.time() if DEBUG else 0
-            model = Model(model_path)
-            rec = KaldiRecognizer(model, 16000)
-
-            if DEBUG:
-                model_init_time = time.time() - model_init_start
-                logger.debug(f"Vosk model initialized in {model_init_time:.3f}s")
-
-            # Reset buffer position
-            wav_buffer.seek(0)
-            # Read the WAV data
-            wav_data = wav_buffer.read()
-
-            if DEBUG:
-                logger.debug(f"Processing {len(wav_data)} bytes with Vosk")
-                process_start_time = time.time()
-
-            # Process audio
-            if len(wav_data) > 0:
-                if rec.AcceptWaveform(wav_data):
-                    result = json.loads(rec.Result())
-                else:
-                    result = json.loads(rec.FinalResult())
-
-                if DEBUG:
-                    process_time = time.time() - process_start_time
-                    logger.debug(f"Vosk processing completed in {process_time:.3f}s")
-                    logger.debug(f"Vosk result: {result}")
-
-                transcript = result.get("text", "")
-
-                if DEBUG:
-                    vosk_total_time = time.time() - vosk_start_time
-                    logger.debug(f"Vosk transcription completed in {vosk_total_time:.3f}s")
-
-                return transcript
-            return ""
-
-        except Exception as inner_e:
-            logger.error(f"Failed to initialize Vosk model: {inner_e}")
-            if DEBUG:
-                import traceback
-                logger.debug(traceback.format_exc())
-            return None
-
-    except Exception as e:
-        logger.error(f"Vosk transcription error: {e}")
-        if DEBUG:
-            import traceback
-            logger.debug(traceback.format_exc())
-        return None
-
 @app.route('/heartbeat')
 def heartbeat():
     return 'asr'
@@ -421,26 +332,20 @@ def recognise():
 
     if ASR_API_PROVIDER == 'elevenlabs':
         if not API_KEY:
-            logger.error("ElevenLabs requires an API key, falling back to Vosk")
-            transcript = vosk_transcribe(wav_buffer)
+            raise Exception("ElevenLabs requires an API key. Please provide one.")
         else:
             transcript = elevenlabs_transcribe(wav_buffer)
     elif ASR_API_PROVIDER == 'groq':
         if not API_KEY:
-            logger.error("Groq requires an API key, falling back to Vosk")
-            transcript = vosk_transcribe(wav_buffer)
+            raise Exception("Groq requires an API key. Please provide one.")
         else:
             transcript = groq_transcribe(wav_buffer)
     elif ASR_API_PROVIDER == 'wyoming-whisper':
         transcript = wyoming_whisper_transcribe(wav_buffer)
         if transcript is None:
-            logger.error("Wyoming-whisper transcription failed, falling back to Vosk")
-            transcript = vosk_transcribe(wav_buffer)
-    elif ASR_API_PROVIDER == 'vosk':
-        transcript = vosk_transcribe(wav_buffer)
+            logger.error("Wyoming-whisper transcription failed.")
     else:
-        logger.error(f"Invalid ASR API provider: {ASR_API_PROVIDER}, falling back to Vosk")
-        transcript = vosk_transcribe(wav_buffer)
+        logger.error(f"Invalid ASR API provider: {ASR_API_PROVIDER}.")
 
     transcription_time = time.time() - transcription_start
 
