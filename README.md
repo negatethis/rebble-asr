@@ -12,8 +12,7 @@ Rebble ASR provides automatic speech recognition services for Pebble smartwatche
 | Variable | Description | Default | Required |
 |----------|-------------|---------|----------|
 | `ASR_API_KEY` | API key for ElevenLabs or Groq | None | Required for cloud providers |
-| `ASR_API_PROVIDER` | Speech recognition provider (`elevenlabs`, `groq`, `wyoming-whisper`, or `vosk`) | `vosk` | No |
-| `PORT` | Port for the HTTP server | 9039 | No |
+| `ASR_API_PROVIDER` | Speech recognition provider (`elevenlabs`, `groq`, `wyoming-whisper`) | None | Yes |
 | `WYOMING_HOST` | Host address for Wyoming service | `localhost` | Required for wyoming-whisper |
 | `WYOMING_PORT` | Port for Wyoming service | `10300` | Required for wyoming-whisper |
 | `DEBUG` | Enable detailed debug logging | `false` | No |
@@ -48,14 +47,6 @@ export WYOMING_HOST=your_wyoming_host  # IP address or hostname
 export WYOMING_PORT=10300  # Default Wyoming port
 ```
 
-#### Vosk (Offline)
-
-Uses Vosk for offline speech recognition. No API key required.
-
-```bash
-export ASR_API_PROVIDER=vosk
-```
-
 ## Debug Mode
 
 Enable detailed logging for troubleshooting:
@@ -70,10 +61,41 @@ Debug mode provides information about:
 - Transcription timing and performance
 - Service communication details
 
-## Fallback Behavior
+### Nix
 
-- If no API key is provided, falls back to Vosk offline recognition
-- If an invalid provider is specified, falls back to Vosk
-- If Wyoming-Whisper is selected but the Wyoming package is not installed, falls back to Vosk
-- If Wyoming-Whisper fails to connect to the Wyoming service, falls back to Vosk
-- Gracefully handles errors by attempting alternative recognition methods
+If you are using Nix and have the Flakes experimental feature activated, you can start a development shell and test run the server with the following commands:
+
+```
+nix develop github:negatethis/rebble-asr
+python3 -m gunicorn -k gevent 0.0.0.0:8080 asr:app
+```
+
+Make sure to export the appropriate environment variables as described above.
+
+There is also a NixOS module exposed through the flake.nix. Here is an example on how to add it to your system's flake.nix:
+
+```nix
+{
+  inputs = {
+    nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
+    rebble-asr.url = "github:negatethis/rebble-asr";
+  };
+
+  outputs = { self, nixpkgs, rebble-asr }: {
+    nixosConfigurations.nixos = nixpkgs.lib.nixosSystem {
+      system = "x86_64-linux";
+      modules = [
+        rebble-asr.nixosModules.default {
+          services.rebble-asr = {
+            enable = true;
+            bind = "0.0.0.0:8080";
+            environmentFile = "/path/to/environment/file"
+          };
+        }
+      ];
+    };
+  };
+}
+```
+
+The environment file should contain the environment variables described above.
